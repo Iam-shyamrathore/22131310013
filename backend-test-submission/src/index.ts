@@ -1,6 +1,6 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { nanoid } from 'nanoid';
 // import { Log } from '../logging-middleware/log'; // Placeholder for later
 
@@ -19,7 +19,7 @@ interface Url {
   clicks: Click[];
 }
 
-// In-memory store (no MongoDB)
+// In-memory store
 const urlStore: Record<string, Url> = {};
 
 const app = express();
@@ -35,14 +35,15 @@ const isValidUrl = (url: string): boolean => {
   }
 };
 
-// Create Short URL
-app.post('/shorturls', async (req: Request, res: Response) => {
+// Create Short URL - FIXED: Removed return statements
+app.post('/shorturls', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { url, validity, shortcode } = req.body;
 
     if (!url || !isValidUrl(url)) {
       // await Log('backend', 'error', 'handler', 'Invalid URL format');
-      return res.status(400).json({ error: 'Invalid URL format' });
+      res.status(400).json({ error: 'Invalid URL format' });
+      return;
     }
 
     const expiry = new Date(Date.now() + (validity || 30) * 60 * 1000);
@@ -51,11 +52,13 @@ app.post('/shorturls', async (req: Request, res: Response) => {
     if (shortcode) {
       if (!/^[a-zA-Z0-9]{3,10}$/.test(shortcode)) {
         // await Log('backend', 'error', 'handler', 'Invalid shortcode: Must be alphanumeric, 3-10 characters');
-        return res.status(400).json({ error: 'Invalid shortcode: Must be alphanumeric, 3-10 characters' });
+        res.status(400).json({ error: 'Invalid shortcode: Must be alphanumeric, 3-10 characters' });
+        return;
       }
       if (urlStore[shortcode]) {
         // await Log('backend', 'error', 'handler', 'Shortcode already in use');
-        return res.status(409).json({ error: 'Shortcode already in use' });
+        res.status(409).json({ error: 'Shortcode already in use' });
+        return;
       }
     }
 
@@ -79,26 +82,27 @@ app.post('/shorturls', async (req: Request, res: Response) => {
       expiry: expiry.toISOString(),
     });
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    // await Log('backend', 'error', 'handler', `Error creating short URL: ${errorMessage}`);
-    res.status(500).json({ error: 'Internal server error' });
+    // await Log('backend', 'error', 'handler', `Error creating short URL: ${(error instanceof Error ? error.message : 'Unknown error')}`);
+    next(error);
   }
 });
 
-// Redirect
-app.get('/:shortcode', async (req: Request, res: Response) => {
+// Redirect - FIXED: Removed return statements
+app.get('/:shortcode', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { shortcode } = req.params;
     const urlDoc = urlStore[shortcode];
 
     if (!urlDoc) {
       // await Log('backend', 'error', 'handler', `Shortcode not found: ${shortcode}`);
-      return res.status(404).json({ error: 'Shortcode not found' });
+      res.status(404).json({ error: 'Shortcode not found' });
+      return;
     }
 
     if (urlDoc.expiry < new Date()) {
       // await Log('backend', 'error', 'handler', `Shortcode expired: ${shortcode}`);
-      return res.status(410).json({ error: 'Shortcode expired' });
+      res.status(410).json({ error: 'Shortcode expired' });
+      return;
     }
 
     urlDoc.clicks.push({
@@ -110,21 +114,21 @@ app.get('/:shortcode', async (req: Request, res: Response) => {
     // await Log('backend', 'info', 'handler', `Redirecting to ${urlDoc.originalUrl}`);
     res.redirect(301, urlDoc.originalUrl);
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    // await Log('backend', 'error', 'handler', `Error redirecting: ${errorMessage}`);
-    res.status(500).json({ error: 'Internal server error' });
+    // await Log('backend', 'error', 'handler', `Error redirecting: ${(error instanceof Error ? error.message : 'Unknown error')}`);
+    next(error);
   }
 });
 
-// Get Statistics
-app.get('/shorturls/:shortcode', async (req: Request, res: Response) => {
+// Get Statistics - FIXED: Removed return statements
+app.get('/shorturls/:shortcode', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { shortcode } = req.params;
     const urlDoc = urlStore[shortcode];
 
     if (!urlDoc) {
       // await Log('backend', 'error', 'handler', `Shortcode not found: ${shortcode}`);
-      return res.status(404).json({ error: 'Shortcode not found' });
+      res.status(404).json({ error: 'Shortcode not found' });
+      return;
     }
 
     // await Log('backend', 'info', 'handler', `Retrieved stats for ${shortcode}`);
@@ -137,10 +141,15 @@ app.get('/shorturls/:shortcode', async (req: Request, res: Response) => {
       clicks: urlDoc.clicks,
     });
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    // await Log('backend', 'error', 'handler', `Error retrieving stats: ${errorMessage}`);
-    res.status(500).json({ error: 'Internal server error' });
+    // await Log('backend', 'error', 'handler', `Error retrieving stats: ${(error instanceof Error ? error.message : 'Unknown error')}`);
+    next(error);
   }
+});
+
+// Error handling middleware
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  console.error('Error:', error);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 const PORT = process.env.PORT || 3000;
